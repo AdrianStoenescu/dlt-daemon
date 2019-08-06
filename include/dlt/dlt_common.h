@@ -75,7 +75,6 @@
  \{
  */
 
-#   include <netinet/in.h>
 #   include <stdio.h>
 #   ifdef __linux__
 #      include <linux/limits.h>
@@ -801,10 +800,10 @@ typedef struct
     int size;
 } DltBufferBlockHead;
 
-#   ifdef DLT_USE_IPv6
-#      define DLT_IP_SIZE (INET6_ADDRSTRLEN)
+#   ifdef DLT_IPv6
+#      define DLT_IP_SIZE (16)
 #   else
-#      define DLT_IP_SIZE (INET_ADDRSTRLEN)
+#      define DLT_IP_SIZE (40)
 #   endif
 typedef struct DltBindAddress
 {
