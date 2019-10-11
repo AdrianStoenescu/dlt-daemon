@@ -66,7 +66,7 @@ typedef struct
 
 /* Function prototype declaration */
 void dlt_daemon_udp_init_clientstruct(DltDaemonClientSockInfo *clientinfo_struct);
-DltReturnValue dlt_daemon_udp_socket_open(int *sock, unsigned int servPort);
+DltReturnValue dlt_daemon_udp_socket_open(int *sock, unsigned int servPort, char *ip);
 void dlt_daemon_udp_setmulticast_addr(DltDaemonLocal *daemon_local);
 
 #endif /* DLT_DAEMON_UDP_COMMON_SOCKET_H */

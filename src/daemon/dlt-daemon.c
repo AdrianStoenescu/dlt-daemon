@@ -300,6 +300,7 @@ int option_file_parser(DltDaemonLocal *daemon_local)
     daemon_local->UDPConnectionSetup = MULTICAST_CONNECTION_ENABLED;
     strncpy(daemon_local->UDPMulticastIPAddress, MULTICASTIPADDRESS, MULTICASTIP_MAX_SIZE - 1);
     daemon_local->UDPMulticastIPPort = MULTICASTIPPORT;
+    strncpy(daemon_local->UDPBindIPAddress, "0.0.0.0", sizeof("0.0.0.0"));
 #endif
     daemon_local->flags.ipNodes = NULL;
 
@@ -637,6 +638,10 @@ int option_file_parser(DltDaemonLocal *daemon_local)
                     else if (strcmp(token, "UDPMulticastIPPort") == 0)
                     {
                         daemon_local->UDPMulticastIPPort = strtol(value, NULL, 10);
+                    }
+                    else if (strcmp(token, "UDPBindIPAddress") == 0)
+                    {
+                        strncpy(daemon_local->UDPBindIPAddress, value, sizeof(daemon_local->UDPBindIPAddress) - 1);
                     }
 #endif
                     else if (strcmp(token, "BindAddress") == 0)

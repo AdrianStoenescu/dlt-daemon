@@ -161,8 +161,9 @@ typedef struct
     unsigned long daemonFifoSize;
 #ifdef UDP_CONNECTION_SUPPORT
     int UDPConnectionSetup; /* enable/disable the UDP connection */
-    char UDPMulticastIPAddress[MULTICASTIP_MAX_SIZE]; /* multicast ip addres */
+    char UDPMulticastIPAddress[MULTICASTIP_MAX_SIZE]; /* multicast ip address */
     int UDPMulticastIPPort; /* multicast port */
+    char UDPBindIPAddress[DLT_IP_SIZE]; /* host address for UDP packets */
 #endif
 } DltDaemonLocal;
 

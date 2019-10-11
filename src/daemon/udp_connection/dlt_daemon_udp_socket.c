@@ -89,7 +89,7 @@ DltReturnValue dlt_daemon_udp_connection_setup(DltDaemonLocal *daemon_local)
     if (daemon_local == NULL)
         return ret_val;
 
-    if ((ret_val = dlt_daemon_udp_socket_open(&fd, daemon_local->flags.port)) != DLT_RETURN_OK) {
+    if ((ret_val = dlt_daemon_udp_socket_open(&fd, daemon_local->flags.port, daemon_local->UDPBindIPAddress)) != DLT_RETURN_OK) {
         dlt_log(LOG_ERR, "Could not initialize udp socket.\n");
     }
     else {
@@ -105,85 +105,79 @@ DltReturnValue dlt_daemon_udp_connection_setup(DltDaemonLocal *daemon_local)
 
 /* ************************************************************************** */
 /* Function   : dlt_daemon_udp_socket_open */
-/* In Param   : contains udp port number */
+/* In Param   : contains udp port number and bind address */
 /* Out Param  : status of udp connection setup */
 /* Description: This funtion is used to setup DGRAM connection */
 /*              does socket()->bind() on udp port */
 /* ************************************************************************** */
-DltReturnValue dlt_daemon_udp_socket_open(int *sock, unsigned int servPort)
+DltReturnValue dlt_daemon_udp_socket_open(int *sock, unsigned int servPort, char *ip)
 {
-    int enable_reuse_addr = 1;
+    int yes = 1;
     int sockbuffer = DLT_DAEMON_RCVBUFSIZESOCK;
-    char portnumbuffer[SOCKPORT_MAX_LEN] = { 0 };
-    struct addrinfo hints;
-    struct addrinfo *servinfo = NULL;
-    struct addrinfo *addrinfo_iterator = NULL;
-    int getaddrinfo_errorcode = -1;
+    int ret_inet_pton = 1;
 
-    if (sock == NULL)
-        return DLT_RETURN_WRONG_PARAMETER;
+    dlt_vlog(LOG_INFO, "dlt_daemon_udp_socket_open: ip is %s\n", ip);
 
-    memset(&hints, 0, sizeof hints);
 #ifdef DLT_USE_IPv6
-    hints.ai_family = AF_INET6; /* force IPv6 - will still work with IPv4 */
+
+    /* create socket */
+    if ((*sock = socket(AF_INET6, SOCK_DGRAM, 0)) == SYSTEM_CALL_ERROR) {
+        dlt_vlog(LOG_WARNING, "dlt_daemon_udp_socket_open: socket() error %d: %s\n", errno, strerror(errno));
+    }
+
 #else
-    hints.ai_family = AF_INET;
+
+    if ((*sock = socket(AF_INET, SOCK_DGRAM, 0)) == SYSTEM_CALL_ERROR) {
+        dlt_vlog(LOG_WARNING, "dlt_daemon_socket_open: socket() error %d: %s\n", errno, strerror(errno));
+    }
+
 #endif
-    hints.ai_socktype = SOCK_DGRAM;/* UDP Connection */
-    hints.ai_flags = AI_PASSIVE; /* use my IP address */
 
-    snprintf(portnumbuffer, SOCKPORT_MAX_LEN, "%d", servPort);
+    dlt_vlog(LOG_INFO, "%s: Socket udp created\n", __FUNCTION__);
 
-    if ((getaddrinfo_errorcode = getaddrinfo(NULL, portnumbuffer, &hints, &servinfo)) != 0) {
-        dlt_vlog(LOG_WARNING, "[%s:%d] getaddrinfo: %s\n", __func__, __LINE__,
-                 gai_strerror(getaddrinfo_errorcode));
-        return DLT_RETURN_ERROR;
+    /* setsockpt SO_REUSEADDR */
+    if (setsockopt(*sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == SYSTEM_CALL_ERROR) {
+        dlt_vlog(LOG_WARNING, "dlt_daemon_udp_socket_open: Setsockopt error %d : %s\n", errno, strerror(errno));
+        close(*sock);
     }
 
-    for (addrinfo_iterator = servinfo; addrinfo_iterator != NULL; addrinfo_iterator = addrinfo_iterator->ai_next) {
-        if ((*sock = socket(addrinfo_iterator->ai_family, addrinfo_iterator->ai_socktype,
-                            addrinfo_iterator->ai_protocol)) == SYSTEM_CALL_ERROR) {
-            dlt_log(LOG_WARNING, "socket() error\n");
-            continue;
-        }
-
-        dlt_vlog(LOG_INFO,
-                 "[%s:%d] Socket created - socket_family:%i socket_type:%i, protocol:%i\n",
-                 __func__, __LINE__, addrinfo_iterator->ai_family,
-                 addrinfo_iterator->ai_socktype, addrinfo_iterator->ai_protocol);
-
-        if (setsockopt(*sock, SOL_SOCKET, SO_REUSEADDR, &enable_reuse_addr, sizeof(enable_reuse_addr))
-            == SYSTEM_CALL_ERROR) {
-            dlt_vlog(LOG_WARNING, "[%s:%d] Setsockopt error %s\n", __func__, __LINE__,
-                     strerror(errno));
-            close(*sock);
-            continue;
-        }
-
-        if (setsockopt(*sock, SOL_SOCKET, SO_RCVBUF, &sockbuffer, sizeof(sockbuffer))
-            == SYSTEM_CALL_ERROR) {
-            dlt_vlog(LOG_WARNING, "[%s:%d] Setsockopt error %s\n", __func__, __LINE__,
-                     strerror(errno));
-            close(*sock);
-            continue;
-        }
-
-        if (bind(*sock, addrinfo_iterator->ai_addr, addrinfo_iterator->ai_addrlen)
-            == SYSTEM_CALL_ERROR) {
-            close(*sock);
-            dlt_log(LOG_WARNING, "bind() error\n");
-            continue;
-        }
-
-        break;
+    if (setsockopt(*sock, SOL_SOCKET, SO_RCVBUF, &sockbuffer, sizeof(sockbuffer)) == SYSTEM_CALL_ERROR) {
+        dlt_vlog(LOG_WARNING, "dlt_daemon_udp_socket_open: Setsockopt error %d : %s\n", errno, strerror(errno));
+        close(*sock);
     }
 
-    if (addrinfo_iterator == NULL) {
-        dlt_log(LOG_WARNING, "failed to bind socket\n");
-        return DLT_RETURN_ERROR;
+    /* bind */
+#ifdef DLT_USE_IPv6
+    struct sockaddr_in6 forced_addr;
+    memset(&forced_addr, 0, sizeof(forced_addr));
+    forced_addr.sin6_family = AF_INET6;
+    forced_addr.sin6_port = htons(servPort);
+    if (0 == strcmp(ip, "0.0.0.0"))
+        forced_addr.sin6_addr = in6addr_any;
+    else
+        ret_inet_pton = inet_pton(AF_INET6, ip, &forced_addr.sin6_addr);
+#else
+    struct sockaddr_in forced_addr;
+    memset(&forced_addr, 0, sizeof(forced_addr));
+    forced_addr.sin_family = AF_INET;
+    forced_addr.sin_port = htons(servPort);
+    ret_inet_pton = inet_pton(AF_INET, ip, &forced_addr.sin_addr);
+#endif
+
+    /* inet_pton returns 1 on success */
+    if (ret_inet_pton != 1) {
+        dlt_vlog(LOG_WARNING,
+                 "dlt_daemon_udp_socket_open: inet_pton() error %d: %s. Cannot convert IP address: %s\n",
+                 errno,
+                 strerror(errno),
+                 ip);
+        return -1;
     }
 
-    freeaddrinfo(servinfo);
+    if (bind(*sock, (struct sockaddr *)&forced_addr, sizeof(forced_addr)) == SYSTEM_CALL_ERROR) {
+        dlt_vlog(LOG_WARNING, "dlt_daemon_udp_socket_open: bind() error %d: %s\n", errno, strerror(errno));
+        close(*sock);
+    }
 
     return DLT_RETURN_OK; /* OK */
 }
