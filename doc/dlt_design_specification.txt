@@ -18,7 +18,7 @@ DLT Design Specification
 Alexander Wenzel <Alexander.AW.Wenzel@bmw.de>
 0.0.1, 2012/10/10: Initial version
 
-image::images/genivi_chrome_1_transparent.png[width=128]
+image::images/genivilogo.png[width=128]
 
 *This document is not up to date*
 
@@ -173,7 +173,7 @@ During unregister of application, the following things occur:
 
 ==== Handling of messages received from DLT daemon
 
-During receiver thread within the DLT user library checks for newly received messages from the DLT daemon, and handles them in the following way:
+During housekeeper thread within the DLT user library checks for newly received messages from the DLT daemon, and handles them in the following way:
 
 * DLT_USER_MESSAGE_LOG_LEVEL
 ** Store received log level and trace status for the received context to the context array

@@ -121,9 +121,13 @@ typedef struct
     char appSockPath[DLT_DAEMON_FLAG_MAX]; /**< Path to User socket */
 #else
     char userPipesDir[DLT_PATH_MAX]; /**< (String: Directory) directory where dltpipes reside (Default: /tmp/dltpipes) */
-#endif
     char daemonFifoName[DLT_PATH_MAX]; /**< (String: Filename) name of local fifo (Default: /tmp/dlt) */
-    unsigned int port;  /**< port number */
+    char daemonFifoGroup[DLT_PATH_MAX]; /**< (String: Group name) Owner group of local fifo (Default: Primary Group) */
+#endif
+#ifdef DLT_SHM_ENABLE
+    char dltShmName[NAME_MAX + 1]; /**< Shared memory name */
+#endif
+    unsigned int port; /**< port number */
     char ctrlSockPath[DLT_DAEMON_FLAG_MAX]; /**< Path to Control socket */
     int gatewayMode; /**< (Boolean) Gateway Mode */
     char gatewayConfigFile[DLT_DAEMON_FLAG_MAX]; /**< Gateway config file path */
@@ -147,6 +151,7 @@ typedef struct
     size_t baudrate;          /**< Baudrate of serial connection */
 #ifdef DLT_SHM_ENABLE
     DltShm dlt_shm;                /**< Shared memory handling */
+    unsigned char *recv_buf_shm;   /**< buffer for receive message from shm */
 #endif
     DltOfflineTrace offlineTrace; /**< Offline trace handling */
     int timeoutOnSend;
@@ -154,6 +159,11 @@ typedef struct
     unsigned long RingbufferMaxSize;
     unsigned long RingbufferStepSize;
     unsigned long daemonFifoSize;
+#ifdef UDP_CONNECTION_SUPPORT
+    int UDPConnectionSetup; /* enable/disable the UDP connection */
+    char UDPMulticastIPAddress[MULTICASTIP_MAX_SIZE]; /* multicast ip addres */
+    int UDPMulticastIPPort; /* multicast port */
+#endif
 } DltDaemonLocal;
 
 typedef struct
@@ -228,13 +238,10 @@ int dlt_daemon_process_user_message_unregister_context(DltDaemon *daemon,
                                                        DltDaemonLocal *daemon_local,
                                                        DltReceiver *rec,
                                                        int verbose);
-int dlt_daemon_process_user_message_log(DltDaemon *daemon, DltDaemonLocal *daemon_local, DltReceiver *rec, int verbose);
-#ifdef DLT_SHM_ENABLE
-int dlt_daemon_process_user_message_log_shm(DltDaemon *daemon,
-                                            DltDaemonLocal *daemon_local,
-                                            DltReceiver *rec,
-                                            int verbose);
-#endif
+int dlt_daemon_process_user_message_log(DltDaemon *daemon,
+                                        DltDaemonLocal *daemon_local,
+                                        DltReceiver *rec,
+                                        int verbose);
 int dlt_daemon_process_user_message_set_app_ll_ts(DltDaemon *daemon,
                                                   DltDaemonLocal *daemon_local,
                                                   DltReceiver *rec,

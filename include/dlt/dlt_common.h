@@ -422,6 +422,13 @@ extern char dltSerialHeaderChar[DLT_ID_SIZE];
  */
 extern char dltFifoBaseDir[DLT_PATH_MAX];
 
+#ifdef DLT_SHM_ENABLE
+/**
+ * The common name of the dlt-daemon and application share memory
+ */
+extern char dltShmName[NAME_MAX + 1];
+#endif
+
 /**
  * The type of a DLT ID (context id, application id, etc.)
  */
@@ -633,7 +640,7 @@ typedef struct
     uint32_t service_id;            /**< service ID */
     uint8_t status;                 /**< reponse status */
     uint32_t length;                /**< length of following payload */
-    /*char [] payload;*/
+    char *payload;                  /**< payload */
 } PACKED DltServiceGetSoftwareVersionResponse;
 
 /**
@@ -689,20 +696,6 @@ typedef struct
     uint8_t connection_type;              /**< connection status of the connected device connected/disconnected */
     char comid[DLT_ID_SIZE];              /**< communication interface */
 } PACKED DltServiceOfflineLogstorage;
-
-/**
- * The structure of DLT Service Get Filter Config
- */
-typedef struct
-{
-    uint32_t service_id;                      /**< service ID */
-    uint8_t status;                           /**< response status */
-    char name[DLT_ENTRY_MAX];                 /**< config name */
-    uint32_t level;                           /**< filter level */
-    uint32_t client_mask;                     /**< client mask */
-    uint32_t ctrl_mask;                       /**< control message mask */
-    char injections[DLT_ENTRY_MAX];           /**< list of injections */
-} PACKED DltServiceGetCurrentFilterInfo;
 
 /**
  * The structure of DLT Service Passive Node Connect

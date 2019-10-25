@@ -136,9 +136,9 @@ int dlt_system_journal_get(sd_journal *j, char *target, const char *field, size_
 void dlt_system_journal_get_timestamp(sd_journal *journal, MessageTimestamp *timestamp)
 {
     int ret = 0;
-    uint64_t time_secs = 0;
+    time_t time_secs = 0;
     uint64_t time_usecs = 0;
-    struct tm *timeinfo = NULL;
+    struct tm timeinfo;
 
     char buffer_realtime[DLT_SYSTEM_JOURNAL_BUFFER_SIZE] = { 0 };
     char buffer_realtime_formatted[DLT_SYSTEM_JOURNAL_BUFFER_SIZE] = { 0 };
@@ -154,7 +154,8 @@ void dlt_system_journal_get_timestamp(sd_journal *journal, MessageTimestamp *tim
         if (errno != 0)
             time_usecs = 0;
     }
-    else if ((ret = sd_journal_get_realtime_usec(journal, &time_usecs)) < 0) {
+    else if ((ret = sd_journal_get_realtime_usec(journal, &time_usecs)) < 0)
+    {
         DLT_LOG(dltsystem, DLT_LOG_WARN,
                 DLT_STRING("dlt-system-journal failed to get realtime: "),
                 DLT_STRING(strerror(-ret)));
@@ -163,9 +164,10 @@ void dlt_system_journal_get_timestamp(sd_journal *journal, MessageTimestamp *tim
         time_usecs = 0;
     }
 
-    time_secs = time_usecs / 1000000;
-    localtime_r((const time_t *)(&time_secs), timeinfo);
-    strftime(buffer_realtime_formatted, sizeof(buffer_realtime_formatted), "%Y/%m/%d %H:%M:%S", timeinfo);
+    time_secs = (time_t)(time_usecs / 1000000);
+    tzset();
+    localtime_r(&time_secs, &timeinfo);
+    strftime(buffer_realtime_formatted, sizeof(buffer_realtime_formatted), "%Y/%m/%d %H:%M:%S", &timeinfo);
 
     snprintf(timestamp->real, sizeof(timestamp->real), "%s.%06" PRIu64, buffer_realtime_formatted,
              time_usecs % 1000000);
@@ -180,7 +182,8 @@ void dlt_system_journal_get_timestamp(sd_journal *journal, MessageTimestamp *tim
         if (errno != 0)
             time_usecs = 0;
     }
-    else if ((ret = sd_journal_get_monotonic_usec(journal, &time_usecs, NULL)) < 0) {
+    else if ((ret = sd_journal_get_monotonic_usec(journal, &time_usecs, NULL)) < 0)
+    {
         DLT_LOG(dltsystem, DLT_LOG_WARN,
                 DLT_STRING("dlt-system-journal failed to get monotonic time: "),
                 DLT_STRING(strerror(-ret)));
@@ -202,6 +205,7 @@ void journal_thread(void *v_conf)
     sd_journal *j;
     char match[DLT_SYSTEM_JOURNAL_BOOT_ID_MAX_LENGTH] = "_BOOT_ID=";
     sd_id128_t boot_id;
+    uint32_t ts;
 
     char buffer_process[DLT_SYSTEM_JOURNAL_BUFFER_SIZE] = { 0 },
          buffer_priority[DLT_SYSTEM_JOURNAL_BUFFER_SIZE] = { 0 },
@@ -345,13 +349,26 @@ void journal_thread(void *v_conf)
                 snprintf(buffer_priority, DLT_SYSTEM_JOURNAL_BUFFER_SIZE, "prio_unknown:");
 
             /* write log entry */
-            DLT_LOG(journalContext, loglevel,
-                    DLT_STRING(timestamp.real),
-                    DLT_STRING(timestamp.monotonic),
-                    DLT_STRING(buffer_process),
-                    DLT_STRING(buffer_priority),
-                    DLT_STRING(buffer_message)
-                    );
+            if (conf->Journal.UseOriginalTimestamp == 0) {
+                DLT_LOG(journalContext, loglevel,
+                        DLT_STRING(timestamp.real),
+                        DLT_STRING(timestamp.monotonic),
+                        DLT_STRING(buffer_process),
+                        DLT_STRING(buffer_priority),
+                        DLT_STRING(buffer_message)
+                        );
+
+            }
+            else {
+                /* since we are talking about points in time, I'd prefer truncating over arithmetic rounding */
+                ts = (uint32_t)(atof(timestamp.monotonic) * 10000);
+                DLT_LOG_TS(journalContext, loglevel, ts,
+                           DLT_STRING(timestamp.real),
+                           DLT_STRING(buffer_process),
+                           DLT_STRING(buffer_priority),
+                           DLT_STRING(buffer_message)
+                           );
+            }
         }
         else {
             r = sd_journal_wait(j, 1000000);
@@ -380,16 +397,6 @@ void journal_thread(void *v_conf)
 
     DLT_UNREGISTER_CONTEXT(journalContext);
 
-}
-
-void start_systemd_journal(DltSystemConfiguration *conf)
-{
-    DLT_LOG(dltsystem, DLT_LOG_DEBUG,
-            DLT_STRING("dlt-system-journal, start journal"));
-    static pthread_attr_t t_attr;
-    static pthread_t pt;
-    pthread_create(&pt, &t_attr, (void *)journal_thread, conf);
-    threads.threads[threads.count++] = pt;
 }
 
 #endif /* DLT_SYSTEMD_JOURNAL_ENABLE */

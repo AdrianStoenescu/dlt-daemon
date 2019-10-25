@@ -67,6 +67,10 @@ const char dltSerialHeader[DLT_ID_SIZE] = { 'D', 'L', 'S', 1 };
 char dltSerialHeaderChar[DLT_ID_SIZE] = { 'D', 'L', 'S', 1 };
 char dltFifoBaseDir[DLT_PATH_MAX] = "/tmp";
 
+#ifdef DLT_SHM_ENABLE
+char dltShmName[NAME_MAX + 1] = "/dlt-shm";
+#endif
+
 /* internal logging parameters */
 static int logging_mode = DLT_LOG_TO_CONSOLE;
 static int logging_level = LOG_INFO;
@@ -636,6 +640,7 @@ DltReturnValue dlt_message_header_flags(DltMessage *msg, char *text, int textlen
     if ((flags & DLT_HEADER_SHOW_TIME) == DLT_HEADER_SHOW_TIME) {
         /* print received time */
         time_t tt = msg->storageheader->seconds;
+        tzset();
         localtime_r(&tt, &timeinfo);
         strftime (buffer, sizeof(buffer), "%Y/%m/%d %H:%M:%S", &timeinfo);
         snprintf(text, textlength, "%s.%.6d ", buffer, msg->storageheader->microseconds);
@@ -826,7 +831,7 @@ DltReturnValue dlt_message_payload(DltMessage *msg, char *text, int textlength, 
             if (datalength > 0) {
                 DLT_MSG_READ_VALUE(retval, ptr, datalength, uint8_t); /* No endian conversion necessary */
 
-                if ((retval < 3) || (retval == 8))
+                if ((retval < DLT_SERVICE_RESPONSE_LAST) || (retval == 8))
                     snprintf(text + strlen(text), textlength - strlen(text), "%s", return_type[retval]);
                 else
                     snprintf(text + strlen(text), textlength - strlen(text), "%.2x", retval);
@@ -1703,6 +1708,14 @@ void dlt_log_set_fifo_basedir(const char *env_pipe_dir)
     dltFifoBaseDir[DLT_PATH_MAX - 1] = 0;
 }
 
+#ifdef DLT_SHM_ENABLE
+void dlt_log_set_shm_name(const char * env_shm_name)
+{
+    strncpy(dltShmName, env_shm_name, NAME_MAX);
+    dltShmName[NAME_MAX] = 0;
+}
+#endif
+
 void dlt_log_init(int mode)
 {
     if ((mode < DLT_LOG_TO_CONSOLE) || (mode > DLT_LOG_DROPPED)) {
@@ -1842,19 +1855,31 @@ DltReturnValue dlt_vnlog(int prio, size_t size, const char *format, ...)
 
 DltReturnValue dlt_receiver_init(DltReceiver *receiver, int fd, int buffersize)
 {
-    if (receiver == NULL)
+    if (NULL == receiver)
         return DLT_RETURN_WRONG_PARAMETER;
 
-    receiver->lastBytesRcvd = 0;
-    receiver->bytesRcvd = 0;
-    receiver->totalBytesRcvd = 0;
-    receiver->buffersize = buffersize;
     receiver->fd = fd;
-    receiver->buffer = (char *)malloc(receiver->buffersize);
-    receiver->backup_buf = NULL;
 
-    if (receiver->buffer == NULL) {
+    /** Reuse the receiver buffer if it exists and the buffer size
+      * is not changed. If not, free the old one and allocate a new buffer.
+      */
+    if ((NULL != receiver->buffer) && (buffersize != receiver->buffersize)) {
+       free(receiver->buffer);
+       receiver->buffer = NULL;
+    }
+
+    if (NULL == receiver->buffer) {
+        receiver->lastBytesRcvd = 0;
+        receiver->bytesRcvd = 0;
+        receiver->totalBytesRcvd = 0;
         receiver->buf = NULL;
+        receiver->backup_buf = NULL;
+        receiver->buffer = (char *)calloc(1, buffersize);
+        receiver->buffersize = buffersize;
+    }
+
+    if (NULL == receiver->buffer) {
+        dlt_log(LOG_ERR, "allocate memory for receiver buffer failed.\n");
         return DLT_RETURN_ERROR;
     }
     else {
@@ -3704,6 +3729,14 @@ void dlt_check_envvar()
 
     if (env_pipe_dir != NULL)
         dlt_log_set_fifo_basedir(env_pipe_dir);
+
+#ifdef DLT_SHM_ENABLE
+    char* env_shm_name = getenv("DLT_SHM_NAME");
+    if (env_shm_name != NULL)
+    {
+        dlt_log_set_shm_name(env_shm_name);
+    }
+#endif
 }
 
 int dlt_set_loginfo_parse_service_id(char *resp_text,

@@ -81,6 +81,10 @@ static inline int8_t getStatus(uint8_t request_log, int context_log)
     return (request_log <= context_log) ? request_log : context_log;
 }
 
+#ifdef UDP_CONNECTION_SUPPORT
+#   include "dlt_daemon_udp_socket.h"
+#endif
+
 /** @brief Sends up to 2 messages to all the clients.
  *
  * Runs through the client list and sends the messages to them. If the message
@@ -158,48 +162,6 @@ static int dlt_daemon_client_send_all_multiple(DltDaemon *daemon,
     } /* for */
 
     return sent;
-}
-
-/** @brief Send out message to all the clients.
- *
- * @param daemon pointer to dlt daemon structure
- * @param daemon_local pointer to dlt daemon local structure
- * @param verbose if set to true verbose information is printed out.
- *
- * @return 1 if transfer succeed, 0 otherwise.
- */
-int dlt_daemon_client_send_all(DltDaemon *daemon,
-                               DltDaemonLocal *daemon_local,
-                               int verbose)
-{
-    void *msg1, *msg2;
-    int msg1_sz, msg2_sz;
-    int ret = 0;
-
-    if ((daemon == NULL) || (daemon_local == NULL)) {
-        dlt_vlog(LOG_ERR, "%s: Invalid parameters\n", __func__);
-        return 0;
-    }
-
-    /* FIXME: the lock shall include the for loop but
-     * dlt_daemon_close_socket may call us too ...
-     */
-    DLT_DAEMON_SEM_LOCK();
-    msg1 = daemon_local->msg.headerbuffer + sizeof(DltStorageHeader);
-    msg1_sz = daemon_local->msg.headersize - sizeof(DltStorageHeader);
-    msg2 = daemon_local->msg.databuffer;
-    msg2_sz = daemon_local->msg.datasize;
-    DLT_DAEMON_SEM_FREE();
-
-    ret = dlt_daemon_client_send_all_multiple(daemon,
-                                              daemon_local,
-                                              msg1,
-                                              msg1_sz,
-                                              msg2,
-                                              msg2_sz,
-                                              verbose);
-
-    return ret;
 }
 
 int dlt_daemon_client_send(int sock,
@@ -284,6 +246,17 @@ int dlt_daemon_client_send(int sock,
 
     /* send messages to daemon socket */
     if ((daemon->mode == DLT_USER_MODE_EXTERNAL) || (daemon->mode == DLT_USER_MODE_BOTH)) {
+#ifdef UDP_CONNECTION_SUPPORT
+
+        if (daemon_local->UDPConnectionSetup == MULTICAST_CONNECTION_ENABLED)
+            dlt_daemon_udp_dltmsg_multicast(data1,
+                                            size1,
+                                            data2,
+                                            size2,
+                                            verbose);
+
+#endif
+
         if ((sock == DLT_DAEMON_SEND_FORCE) || (daemon->state == DLT_DAEMON_STATE_SEND_DIRECT)) {
             sent = dlt_daemon_client_send_all_multiple(daemon,
                                                        daemon_local,
@@ -320,6 +293,95 @@ int dlt_daemon_client_send(int sock,
 
     return DLT_DAEMON_ERROR_OK;
 
+}
+
+int dlt_daemon_client_send_message_to_all_client(DltDaemon *daemon,
+                                       DltDaemonLocal *daemon_local,
+                                       int verbose)
+{
+    int ret = DLT_DAEMON_ERROR_OK;
+    static char text[DLT_DAEMON_TEXTSIZE];
+    char * ecu_ptr = NULL;
+
+    PRINT_FUNCTION_VERBOSE(verbose);
+
+    if ((daemon == NULL) || (daemon_local == NULL)) {
+        dlt_vlog(LOG_ERR, "%s: invalid arguments\n", __func__);
+        return DLT_DAEMON_ERROR_UNKNOWN;
+    }
+
+    /* set overwrite ecu id */
+    if ((daemon_local->flags.evalue[0]) &&
+        (strncmp(daemon_local->msg.headerextra.ecu,
+                 DLT_DAEMON_ECU_ID, DLT_ID_SIZE) == 0)) {
+        /* Set header extra parameters */
+        dlt_set_id(daemon_local->msg.headerextra.ecu, daemon->ecuid);
+
+        /*msg.headerextra.seid = 0; */
+        if (dlt_message_set_extraparameters(&(daemon_local->msg), 0)) {
+            dlt_vlog(LOG_WARNING,
+                     "%s: failed to set message extra parameters.\n", __func__);
+            return DLT_DAEMON_ERROR_UNKNOWN;
+        }
+
+        /* Correct value of timestamp, this was changed by dlt_message_set_extraparameters() */
+        daemon_local->msg.headerextra.tmsp =
+                        DLT_BETOH_32(daemon_local->msg.headerextra.tmsp);
+    }
+
+    /* prepare storage header */
+    if (DLT_IS_HTYP_WEID(daemon_local->msg.standardheader->htyp)) {
+        ecu_ptr = daemon_local->msg.headerextra.ecu;
+    } else {
+        ecu_ptr = daemon->ecuid;
+    }
+
+    if (dlt_set_storageheader(daemon_local->msg.storageheader, ecu_ptr)) {
+        dlt_vlog(LOG_WARNING,
+                 "%s: failed to set storage header with header type: 0x%x\n",
+                 __func__, daemon_local->msg.standardheader->htyp);
+        return DLT_DAEMON_ERROR_UNKNOWN;
+    }
+
+    /* if no filter set or filter is matching display message */
+    if (daemon_local->flags.xflag) {
+        if (DLT_RETURN_OK !=
+            dlt_message_print_hex(&(daemon_local->msg), text,
+                                  DLT_DAEMON_TEXTSIZE, verbose))
+            dlt_log(LOG_WARNING, "dlt_message_print_hex() failed!\n");
+    } else if (daemon_local->flags.aflag) {
+        if (DLT_RETURN_OK !=
+            dlt_message_print_ascii(&(daemon_local->msg), text,
+                                    DLT_DAEMON_TEXTSIZE, verbose))
+            dlt_log(LOG_WARNING, "dlt_message_print_ascii() failed!\n");
+    } else if (daemon_local->flags.sflag) {
+        if (DLT_RETURN_OK !=
+            dlt_message_print_header(&(daemon_local->msg), text,
+                                     DLT_DAEMON_TEXTSIZE, verbose))
+            dlt_log(LOG_WARNING, "dlt_message_print_header() failed!\n");
+    }
+
+    /* check if overflow occurred */
+    if (daemon->overflow_counter) {
+        ret = dlt_daemon_send_message_overflow(daemon, daemon_local, verbose);
+        if (DLT_DAEMON_ERROR_OK == ret) {
+            dlt_vlog(LOG_WARNING, "%u messages discarded!\n",
+                     daemon->overflow_counter);
+            daemon->overflow_counter = 0;
+        }
+    }
+
+    /* send message to client or write to log file */
+    ret = dlt_daemon_client_send(DLT_DAEMON_SEND_TO_ALL, daemon, daemon_local,
+            daemon_local->msg.headerbuffer, sizeof(DltStorageHeader),
+            daemon_local->msg.headerbuffer + sizeof(DltStorageHeader),
+            daemon_local->msg.headersize - sizeof(DltStorageHeader),
+            daemon_local->msg.databuffer, daemon_local->msg.datasize, verbose);
+
+    if (ret == DLT_DAEMON_ERROR_BUFFER_FULL)
+        daemon->overflow_counter++;
+
+    return ret;
 }
 
 int dlt_daemon_client_send_control_message(int sock,
@@ -438,7 +500,7 @@ int dlt_daemon_client_process_control(int sock,
     id_tmp = *((uint32_t *)(msg->databuffer));
     id = DLT_ENDIAN_GET_32(msg->standardheader->htyp, id_tmp);
 
-    if ((id > 0) && (id < DLT_SERVICE_ID_CALLSW_CINJECTION)) {
+    if ((id > DLT_SERVICE_ID) && (id < DLT_SERVICE_ID_CALLSW_CINJECTION)) {
         /* Control message handling */
         switch (id) {
         case DLT_SERVICE_ID_SET_LOG_LEVEL:
@@ -616,16 +678,6 @@ int dlt_daemon_client_process_control(int sock,
                                                        verbose);
             break;
         }
-        case DLT_SERVICE_ID_SET_ALL_LOG_LEVEL:
-        {
-            dlt_daemon_control_set_all_log_level(sock, daemon, daemon_local, msg, verbose);
-            break;
-        }
-        case DLT_SERVICE_ID_SET_ALL_TRACE_STATUS:
-        {
-            dlt_daemon_control_set_all_trace_status(sock, daemon, daemon_local, msg, verbose);
-            break;
-        }
         case DLT_SERVICE_ID_OFFLINE_LOGSTORAGE:
         {
             dlt_daemon_control_service_logstorage(sock, daemon, daemon_local, msg, verbose);
@@ -646,6 +698,16 @@ int dlt_daemon_client_process_control(int sock,
                                                            daemon,
                                                            daemon_local,
                                                            verbose);
+            break;
+        }
+        case DLT_SERVICE_ID_SET_ALL_LOG_LEVEL:
+        {
+            dlt_daemon_control_set_all_log_level(sock, daemon, daemon_local, msg, verbose);
+            break;
+        }
+        case DLT_SERVICE_ID_SET_ALL_TRACE_STATUS:
+        {
+            dlt_daemon_control_set_all_trace_status(sock, daemon, daemon_local, msg, verbose);
             break;
         }
         default:
@@ -693,7 +755,8 @@ void dlt_daemon_control_get_software_version(int sock, DltDaemon *daemon, DltDae
     /* prepare payload of data */
     len = strlen(daemon->ECUVersionString);
 
-    msg.datasize = sizeof(DltServiceGetSoftwareVersionResponse) + len;
+    /* msg.datasize = sizeof(serviceID) + sizeof(status) + sizeof(length) + len */
+    msg.datasize = sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint32_t) + len;
 
     if (msg.databuffer && (msg.databuffersize < msg.datasize)) {
         free(msg.databuffer);
@@ -719,7 +782,7 @@ void dlt_daemon_control_get_software_version(int sock, DltDaemon *daemon, DltDae
     resp->service_id = DLT_SERVICE_ID_GET_SOFTWARE_VERSION;
     resp->status = DLT_SERVICE_RESPONSE_OK;
     resp->length = len;
-    memcpy(msg.databuffer + sizeof(DltServiceGetSoftwareVersionResponse), daemon->ECUVersionString, len);
+    memcpy(msg.databuffer + msg.datasize - len, daemon->ECUVersionString, len);
 
     /* send message */
     dlt_daemon_client_send_control_message(sock, daemon, daemon_local, &msg, "", "", verbose);
@@ -1401,6 +1464,7 @@ int dlt_daemon_control_message_timezone(int sock, DltDaemon *daemon, DltDaemonLo
 
     time_t t = time(NULL);
     struct tm lt;
+    tzset();
     localtime_r(&t, &lt);
 #if !defined(__CYGWIN__)
     resp->timezone = (int32_t)lt.tm_gmtoff;
@@ -2268,6 +2332,7 @@ int dlt_daemon_process_sixty_s_timer(DltDaemon *daemon,
 
         /*Added memset to avoid compiler warning for near initialization */
         memset((void *)&lt, 0, sizeof(lt));
+        tzset();
         localtime_r(&t, &lt);
 
         dlt_daemon_control_message_timezone(DLT_DAEMON_SEND_TO_ALL,
