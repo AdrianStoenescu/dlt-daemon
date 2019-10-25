@@ -163,6 +163,7 @@ typedef struct
     int UDPConnectionSetup; /* enable/disable the UDP connection */
     char UDPMulticastIPAddress[MULTICASTIP_MAX_SIZE]; /* multicast ip addres */
     int UDPMulticastIPPort; /* multicast port */
+    char UDPBindIPAddress[DLT_IP_SIZE]; /* host address for UDP packets */
 #endif
 } DltDaemonLocal;
 

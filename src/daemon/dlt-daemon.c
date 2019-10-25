@@ -222,7 +222,6 @@ int option_handling(DltDaemonLocal *daemon_local, int argc, char *argv[])
 #ifndef DLT_USE_UNIX_SOCKET_IPC
     snprintf(daemon_local->flags.userPipesDir, DLT_PATH_MAX,
              "%s/dltpipes", dltFifoBaseDir);
-#endif
     snprintf(daemon_local->flags.daemonFifoName, DLT_PATH_MAX,
              "%s/dlt", dltFifoBaseDir);
 #endif
@@ -305,6 +304,7 @@ int option_file_parser(DltDaemonLocal *daemon_local)
     daemon_local->UDPConnectionSetup = MULTICAST_CONNECTION_ENABLED;
     strncpy(daemon_local->UDPMulticastIPAddress, MULTICASTIPADDRESS, MULTICASTIP_MAX_SIZE - 1);
     daemon_local->UDPMulticastIPPort = MULTICASTIPPORT;
+    strncpy(daemon_local->UDPBindIPAddress, "0.0.0.0", sizeof("0.0.0.0"));
 #endif
     daemon_local->flags.ipNodes = NULL;
 
@@ -643,6 +643,10 @@ int option_file_parser(DltDaemonLocal *daemon_local)
                     {
                         daemon_local->UDPMulticastIPPort = strtol(value, NULL, 10);
                     }
+                    else if (strcmp(token, "UDPBindIPAddress") == 0)
+                    {
+                        strncpy(daemon_local->UDPBindIPAddress, value, sizeof(daemon_local->UDPBindIPAddress) - 1);
+                    }
 #endif
                     else if (strcmp(token, "BindAddress") == 0)
                     {
@@ -754,6 +758,7 @@ static DltReturnValue dlt_daemon_create_pipes_dir(char *dir)
 int main(int argc, char *argv[])
 {
     char version[DLT_DAEMON_TEXTBUFSIZE];
+    char local_str[DLT_DAEMON_TEXTBUFSIZE];
     DltDaemonLocal daemon_local;
     DltDaemon daemon;
     int back = 0;
