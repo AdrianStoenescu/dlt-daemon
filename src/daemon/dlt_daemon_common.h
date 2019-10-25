@@ -111,6 +111,9 @@ extern sem_t dlt_daemon_mutex;
     #      define MULTICASTIP_MAX_SIZE 256
     #      define MULTICAST_CONNECTION_DISABLED 0
     #      define MULTICAST_CONNECTION_ENABLED 1
+    #      define MULTICAST_UDP_CONNECTION_SETUP_MAX_RETRIES (30)
+/* This is the delay in seconds between two consecutive udp connection setup retries */
+    #      define MULTICAST_UDP_CONNECTION_SETUP_DELAY_RETRY (2)
 #   endif
 
 /**

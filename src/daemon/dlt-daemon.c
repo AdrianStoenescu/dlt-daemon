@@ -94,6 +94,10 @@ int g_exit = 0;
 
 int g_signo = 0;
 
+#ifdef UDP_CONNECTION_SUPPORT
+static void *dlt_daemon_udp_thread(void *);
+#endif
+
 /**
  * Print usage information of tool.
  */
@@ -1170,7 +1174,6 @@ static int dlt_daemon_init_fifo(DltDaemonLocal *daemon_local)
     int ret;
     int fd = -1;
     int fifo_size;
-    char local_str[DLT_DAEMON_TEXTBUFSIZE];
 
     /* open named pipe(FIFO) to receive DLT messages from users */
     umask(0);
@@ -1182,12 +1185,8 @@ static int dlt_daemon_init_fifo(DltDaemonLocal *daemon_local)
     ret = mkfifo(tmpFifo, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 
     if (ret == -1) {
-        snprintf(local_str,
-                 DLT_DAEMON_TEXTBUFSIZE,
-                 "FIFO user %s cannot be created (%s)!\n",
-                 tmpFifo,
-                 strerror(errno));
-        dlt_log(LOG_WARNING, local_str);
+        dlt_vlog(LOG_WARNING, "FIFO user %s cannot be created (%s)!\n",
+                 tmpFifo, strerror(errno));
         return -1;
     } /* if */
 
@@ -1253,6 +1252,7 @@ int dlt_daemon_local_connection_init(DltDaemon *daemon,
                                      DltDaemonLocal *daemon_local,
                                      int verbose)
 {
+    sleep(20);
     char local_str[DLT_DAEMON_TEXTBUFSIZE];
     int fd = -1;
     int mask = 0;
@@ -1345,17 +1345,13 @@ int dlt_daemon_local_connection_init(DltDaemon *daemon,
     }
 
 #ifdef UDP_CONNECTION_SUPPORT
-
     if (daemon_local->UDPConnectionSetup == MULTICAST_CONNECTION_ENABLED) {
-        if (dlt_daemon_udp_connection_setup(daemon_local) < 0) {
-            dlt_log(LOG_ERR, "UDP fd creation failed\n");
-            return DLT_RETURN_ERROR;
-        }
-        else {
-            dlt_log(LOG_INFO, "UDP fd creation success\n");
+        pthread_t udpThread = 0;
+        int rc = pthread_create(&udpThread, NULL, dlt_daemon_udp_thread, daemon_local);
+        if (rc != 0) {
+            dlt_log(LOG_ERR, "udpThread start failed\n");
         }
     }
-
 #endif
 
     /* create and open unix socket to receive incoming connections from
@@ -3226,6 +3222,22 @@ int dlt_daemon_close_socket(int sock, DltDaemon *daemon, DltDaemonLocal *daemon_
 
     return 0;
 }
+
+#ifdef UDP_CONNECTION_SUPPORT
+void* dlt_daemon_udp_thread(void* arg)
+{
+    for (int i = 0; i < MULTICAST_UDP_CONNECTION_SETUP_MAX_RETRIES; i++) {
+        if (dlt_daemon_udp_connection_setup((DltDaemonLocal*)arg) != DLT_RETURN_OK) {
+            dlt_vlog(LOG_ERR, "UDP fd creation failed, retry %d\n", i);
+            sleep(MULTICAST_UDP_CONNECTION_SETUP_DELAY_RETRY);
+        } else {
+            dlt_log(LOG_INFO, "UDP fd creation success\n");
+            break;
+        }
+    }
+    return NULL;
+}
+#endif
 
 /**
  \}

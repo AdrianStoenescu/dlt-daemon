@@ -120,12 +120,14 @@ DltReturnValue dlt_daemon_udp_socket_open(int *sock, unsigned int servPort, char
     /* create socket */
     if ((*sock = socket(AF_INET6, SOCK_DGRAM, 0)) == SYSTEM_CALL_ERROR) {
         dlt_vlog(LOG_WARNING, "dlt_daemon_udp_socket_open: socket() error %d: %s\n", errno, strerror(errno));
+        return DLT_RETURN_ERROR;
     }
 
 #else
 
     if ((*sock = socket(AF_INET, SOCK_DGRAM, 0)) == SYSTEM_CALL_ERROR) {
         dlt_vlog(LOG_WARNING, "dlt_daemon_socket_open: socket() error %d: %s\n", errno, strerror(errno));
+        return DLT_RETURN_ERROR;
     }
 
 #endif
@@ -136,11 +138,13 @@ DltReturnValue dlt_daemon_udp_socket_open(int *sock, unsigned int servPort, char
     if (setsockopt(*sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == SYSTEM_CALL_ERROR) {
         dlt_vlog(LOG_WARNING, "dlt_daemon_udp_socket_open: Setsockopt error %d : %s\n", errno, strerror(errno));
             close(*sock);
+            return DLT_RETURN_ERROR;
         }
 
     if (setsockopt(*sock, SOL_SOCKET, SO_RCVBUF, &sockbuffer, sizeof(sockbuffer)) == SYSTEM_CALL_ERROR) {
         dlt_vlog(LOG_WARNING, "dlt_daemon_udp_socket_open: Setsockopt error %d : %s\n", errno, strerror(errno));
         close(*sock);
+        return DLT_RETURN_ERROR;
     }
 
     /* bind */
@@ -168,12 +172,13 @@ DltReturnValue dlt_daemon_udp_socket_open(int *sock, unsigned int servPort, char
                  errno,
                  strerror(errno),
                  ip);
-        return -1;
+        return DLT_RETURN_ERROR;
     }
 
     if (bind(*sock, (struct sockaddr *)&forced_addr, sizeof(forced_addr)) == SYSTEM_CALL_ERROR) {
         dlt_vlog(LOG_WARNING, "dlt_daemon_udp_socket_open: bind() error %d: %s\n", errno, strerror(errno));
         close(*sock);
+        return DLT_RETURN_ERROR;
     }
 
     return DLT_RETURN_OK; /* OK */
