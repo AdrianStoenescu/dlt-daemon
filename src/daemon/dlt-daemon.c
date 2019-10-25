@@ -1,4 +1,5 @@
 /*
+ * @licence app begin@
  * SPDX license identifier: MPL-2.0
  *
  * Copyright (C) 2011-2015, BMW AG
@@ -11,6 +12,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * For further information see http://www.genivi.org/.
+ * @licence end@
  */
 
 /*!
@@ -78,6 +80,9 @@
  \{
  */
 
+/** Global text output buffer, mainly used for creation of error/warning strings */
+static char str[DLT_DAEMON_TEXTBUFSIZE];
+
 static int dlt_daemon_log_internal(DltDaemon *daemon, DltDaemonLocal *daemon_local, char *str, int verbose);
 
 #ifdef DLT_SYSTEMD_WATCHDOG_ENABLE
@@ -138,8 +143,7 @@ int option_handling(DltDaemonLocal *daemon_local, int argc, char *argv[])
 
     /* default values */
     daemon_local->flags.port = DLT_DAEMON_TCP_PORT;
-    strncpy(dltFifoBaseDir, DLT_USER_IPC_PATH, DLT_PATH_MAX);
-    dltFifoBaseDir[DLT_PATH_MAX - 1] = 0;
+    strncpy(dltFifoBaseDir, DLT_USER_IPC_PATH, sizeof(DLT_USER_IPC_PATH));
 
 #ifdef DLT_SHM_ENABLE
     strncpy(dltShmName, "/dlt-shm", NAME_MAX);
@@ -167,8 +171,7 @@ int option_handling(DltDaemonLocal *daemon_local, int argc, char *argv[])
         }
         case 't':
         {
-            strncpy(dltFifoBaseDir, optarg, DLT_PATH_MAX);
-            dltFifoBaseDir[DLT_PATH_MAX - 1] = 0;
+            strncpy(dltFifoBaseDir, optarg, NAME_MAX);
             break;
         }
 #ifdef DLT_SHM_ENABLE
@@ -254,9 +257,10 @@ int option_file_parser(DltDaemonLocal *daemon_local)
     daemon_local->flags.loggingMode = DLT_LOG_TO_CONSOLE;
     daemon_local->flags.loggingLevel = LOG_INFO;
     snprintf(daemon_local->flags.loggingFilename,
-             sizeof(daemon_local->flags.loggingFilename),
+             sizeof(daemon_local->flags.loggingFilename) - 1,
              "%s/dlt.log",
              dltFifoBaseDir);
+    daemon_local->flags.loggingFilename[sizeof(daemon_local->flags.loggingFilename) - 1] = 0;
     daemon_local->timeoutOnSend = 4;
     daemon_local->RingbufferMinSize = DLT_DAEMON_RINGBUFFER_MIN_SIZE;
     daemon_local->RingbufferMaxSize = DLT_DAEMON_RINGBUFFER_MAX_SIZE;
@@ -917,6 +921,10 @@ int main(int argc, char *argv[])
 
     dlt_daemon_local_cleanup(&daemon, &daemon_local, daemon_local.flags.vflag);
 
+#ifdef UDP_CONNECTION_SUPPORT
+    dlt_daemon_udp_close_connection();
+#endif
+
     dlt_gateway_deinit(&daemon_local.pGateway, daemon_local.flags.vflag);
 
     dlt_daemon_free(&daemon, daemon_local.flags.vflag);
@@ -1104,8 +1112,11 @@ static int dlt_daemon_init_serial(DltDaemonLocal *daemon_local)
     fd = open(daemon_local->flags.yvalue, O_RDWR);
 
     if (fd < 0) {
-        dlt_vlog(LOG_ERR, "Failed to open serial device %s\n",
+        snprintf(str,
+                 DLT_DAEMON_TEXTBUFSIZE,
+                 "Failed to open serial device %s\n",
                  daemon_local->flags.yvalue);
+        dlt_log(LOG_ERR, str);
 
         daemon_local->flags.yvalue[0] = 0;
         return -1;
@@ -1123,8 +1134,12 @@ static int dlt_daemon_init_serial(DltDaemonLocal *daemon_local)
             close(fd);
             daemon_local->flags.yvalue[0] = 0;
 
-            dlt_vlog(LOG_ERR, "Failed to configure serial device %s (%s) \n",
-                     daemon_local->flags.yvalue, strerror(errno));
+            snprintf(str,
+                     DLT_DAEMON_TEXTBUFSIZE,
+                     "Failed to configure serial device %s (%s) \n",
+                     daemon_local->flags.yvalue,
+                     strerror(errno));
+            dlt_log(LOG_ERR, str);
 
             return -1;
         }
@@ -1155,6 +1170,7 @@ static int dlt_daemon_init_fifo(DltDaemonLocal *daemon_local)
     int ret;
     int fd = -1;
     int fifo_size;
+    char local_str[DLT_DAEMON_TEXTBUFSIZE];
 
     /* open named pipe(FIFO) to receive DLT messages from users */
     umask(0);
@@ -1166,8 +1182,12 @@ static int dlt_daemon_init_fifo(DltDaemonLocal *daemon_local)
     ret = mkfifo(tmpFifo, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 
     if (ret == -1) {
-        dlt_vlog(LOG_WARNING, "FIFO user %s cannot be created (%s)!\n",
-                 tmpFifo, strerror(errno));
+        snprintf(local_str,
+                 DLT_DAEMON_TEXTBUFSIZE,
+                 "FIFO user %s cannot be created (%s)!\n",
+                 tmpFifo,
+                 strerror(errno));
+        dlt_log(LOG_WARNING, local_str);
         return -1;
     } /* if */
 
@@ -1233,6 +1253,7 @@ int dlt_daemon_local_connection_init(DltDaemon *daemon,
                                      DltDaemonLocal *daemon_local,
                                      int verbose)
 {
+    char local_str[DLT_DAEMON_TEXTBUFSIZE];
     int fd = -1;
     int mask = 0;
     DltBindAddress_t *head = daemon_local->flags.ipNodes;
@@ -1240,7 +1261,12 @@ int dlt_daemon_local_connection_init(DltDaemon *daemon,
     PRINT_FUNCTION_VERBOSE(verbose);
 
     if ((daemon == NULL) || (daemon_local == NULL)) {
-        dlt_vlog(LOG_ERR, "%s: Invalid function parameters\n", __func__);
+        snprintf(local_str,
+                 DLT_DAEMON_TEXTBUFSIZE,
+                 "%s: Invalid function parameters\n",
+                 __func__);
+
+        dlt_log(LOG_ERR, local_str);
         return -1;
     }
 
@@ -1322,11 +1348,11 @@ int dlt_daemon_local_connection_init(DltDaemon *daemon,
 
     if (daemon_local->UDPConnectionSetup == MULTICAST_CONNECTION_ENABLED) {
         if (dlt_daemon_udp_connection_setup(daemon_local) < 0) {
-            dlt_log(LOG_ERR, "UDP fd creation and register in epoll failed\n");
+            dlt_log(LOG_ERR, "UDP fd creation failed\n");
             return DLT_RETURN_ERROR;
         }
         else {
-            dlt_log(LOG_INFO, "UDP fd creation and register in epoll success\n");
+            dlt_log(LOG_INFO, "UDP fd creation success\n");
         }
     }
 
@@ -1494,9 +1520,9 @@ void dlt_daemon_local_cleanup(DltDaemon *daemon, DltDaemonLocal *daemon_local, i
 
 void dlt_daemon_exit_trigger()
 {
-    char tmp[DLT_PATH_MAX] = { 0 };
+    char tmp[PATH_MAX + 1] = { 0 };
 
-    snprintf(tmp, DLT_PATH_MAX, "%s/dlt", dltFifoBaseDir);
+    snprintf(tmp, PATH_MAX, "%s/dlt", dltFifoBaseDir);
     (void)unlink(tmp);
 
     /* stop event loop */
@@ -1670,8 +1696,8 @@ int dlt_daemon_log_internal(DltDaemon *daemon, DltDaemonLocal *daemon_local, cha
         /* check if overflow occurred */
         if (daemon->overflow_counter) {
             if (dlt_daemon_send_message_overflow(daemon, daemon_local, verbose) == 0) {
-                dlt_vlog(LOG_WARNING, "%u messages discarded!\n",
-                         daemon->overflow_counter);
+                sprintf(str, "%u messages discarded!\n", daemon->overflow_counter);
+                dlt_log(LOG_WARNING, str);
                 daemon->overflow_counter = 0;
             }
         }
@@ -1772,9 +1798,12 @@ int dlt_daemon_process_client_connect(DltDaemon *daemon,
                                                 daemon_local->flags.vflag);
     }
 
-    dlt_vlog(LOG_DEBUG,
+    snprintf(local_str,
+             DLT_DAEMON_TEXTBUFSIZE,
              "New client connection #%d established, Total Clients : %d\n",
-             in_sock, daemon_local->client_connections);
+             in_sock,
+             daemon_local->client_connections);
+    dlt_log(LOG_DEBUG, local_str);
     dlt_daemon_log_internal(daemon, daemon_local, local_str, daemon_local->flags.vflag);
 
     if (daemon_local->client_connections == 1) {
@@ -1820,6 +1849,7 @@ int dlt_daemon_process_client_messages(DltDaemon *daemon,
                                 daemon,
                                 daemon_local,
                                 verbose);
+        receiver->fd = -1;
         return -1;
     }
 
@@ -2063,6 +2093,7 @@ int dlt_daemon_process_control_messages(
                                 daemon,
                                 daemon_local,
                                 verbose);
+        receiver->fd = -1;
         /* FIXME: Why the hell do we need to close the socket
          * on control message reception ??
          */
